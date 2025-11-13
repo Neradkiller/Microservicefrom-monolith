@@ -1,0 +1,49 @@
+services:
+  api-gateway:
+    build:
+      context: ./api-gateway
+    ports:
+      - "80:80"
+    networks:
+      - ecommerce-network
+    depends_on:
+      - user-service
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    depends_on:
+      postgres-users:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres-users:
+    image: postgres:15-alpine
+    container_name: postgres
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: 123456789
+    volumes:
+      - ./db-scripts/postgres-init-user.sql:/docker-entrypoint-initdb.d/postgres-init.sql
+      - postgres_data_users:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d user" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce-network
+
+volumes:
+  postgres_data_users: {}
+
+networks:
+  ecommerce-network:
