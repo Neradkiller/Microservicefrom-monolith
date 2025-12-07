@@ -1,0 +1,86 @@
+databaseChangeLog:
+  - changeSet:
+      id: 003-create-products-table
+      author: dev-team
+      changes:
+        - createTable:
+            tableName: products
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: name
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: description
+                  type: TEXT
+              - column:
+                  name: price
+                  type: DECIMAL(10,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: stock
+                  type: BIGINT
+                  defaultValue: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: BIGINT
+                  defaultValue: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: reserved_stock
+                  type: BIGINT
+                  defaultValue: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: category
+                  type: VARCHAR(100)
+              - column:
+                  name: status
+                  type: VARCHAR(50)
+                  defaultValue: ACTIVE
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP
+
+        - createIndex:
+            tableName: products
+            indexName: idx_products_status_stock
+            columns:
+              - column:
+                  name: status
+              - column:
+                  name: stock
+
+        - createIndex:
+            tableName: products
+            indexName: idx_products_category
+            columns:
+              - column:
+                  name: category
+
+        - createIndex:
+            tableName: products
+            indexName: idx_products_name
+            columns:
+              - column:
+                  name: name

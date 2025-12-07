@@ -19,19 +19,21 @@ public class Product {
     private final String description;
     private final BigDecimal price;
     private final Long stock;
+    private final Long reservedStock;
     private final String category;
     private final ProductStatus status;
     private final LocalDateTime createdAt;
     private final LocalDateTime updatedAt;
 
     private Product(Long id, String name, String description, BigDecimal price,
-                    Long stock, String category, ProductStatus status,
+                    Long stock, Long reservedStock, String category, ProductStatus status,
                     LocalDateTime createdAt, LocalDateTime updatedAt) {
         this.id = id;
         this.name = name;
         this.description = description;
         this.price = price;
         this.stock = stock;
+        this.reservedStock = reservedStock;
         this.category = category;
         this.status = status;
         this.createdAt = createdAt;
@@ -55,10 +57,6 @@ public class Product {
         return this.stock > 0 && this.status == ProductStatus.ACTIVE;
     }
 
-    public boolean hasStock() {
-        return this.stock > 0;
-    }
-
     public Product reduceStock(Long quantity) {
         if (quantity <= 0) {
             throw new DomainException("Quantity must be positive");
@@ -69,6 +67,44 @@ public class Product {
 
         return this.toBuilder()
                 .stock(this.stock - quantity)
+                .updatedAt(LocalDateTime.now())
+                .build();
+    }
+
+    public Product reserveStock(Long quantity) {
+        if (quantity <= 0) {
+            throw new DomainException("Quantity must be positive");
+        }
+        if (this.stock < quantity) {
+            throw new DomainException("Insufficient stock");
+        }
+
+        return this.toBuilder()
+                .stock(this.stock - quantity)
+                .reservedStock(this.reservedStock + quantity)
+                .updatedAt(LocalDateTime.now())
+                .build();
+    }
+
+    public Product revertStock(Long quantity) {
+        if (quantity <= 0) {
+            throw new DomainException("Quantity must be positive");
+        }
+
+        return this.toBuilder()
+                .stock(this.stock + quantity)
+                .reservedStock(this.reservedStock - quantity)
+                .updatedAt(LocalDateTime.now())
+                .build();
+    }
+
+    public Product releaseStock(Long quantity) {
+        if (quantity <= 0) {
+            throw new DomainException("Quantity must be positive");
+        }
+
+        return this.toBuilder()
+                .reservedStock(this.reservedStock - quantity)
                 .updatedAt(LocalDateTime.now())
                 .build();
     }
@@ -142,6 +178,9 @@ public class Product {
             }
             if (super.updatedAt == null) {
                 super.updatedAt = LocalDateTime.now();
+            }
+            if(super.reservedStock == null){
+                super.reservedStock = 0L;
             }
 
             return super.build();

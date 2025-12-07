@@ -1,162 +1,241 @@
 package com.non_real_ecommerce.product_service.application.service;
 
+import com.non_real_ecommerce.product_service.domain.exception.ConcurrencyException;
 import com.non_real_ecommerce.product_service.domain.exception.ProductNotFounfException;
 import com.non_real_ecommerce.product_service.domain.model.Product;
 import com.non_real_ecommerce.product_service.domain.model.ProductStatus;
 import com.non_real_ecommerce.product_service.domain.port.input.ProductService;
 import com.non_real_ecommerce.product_service.domain.port.output.ProductRepository;
+import com.non_real_ecommerce.product_service.infrastructure.persistence.mapper.ProductMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.Comparator;
-import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 @Slf4j
 @RequiredArgsConstructor
 public class ProductServiceImpl implements ProductService {
     private final ProductRepository productRepository;
+    private final ProductMapper productMapper;
 
     @Override
     @Transactional
-    public Product createProduct(String name, String description, BigDecimal price, Long stock) {
-        log.info("Registering new roduct with name: {}", name);
+    public Product createProduct(String name, String description, BigDecimal price, Long stock, String category) {
+        log.info("Creating new product with name: {}", name);
         Product product = Product.builder()
                 .name(name)
                 .description(description)
                 .price(price)
-                .stock(stock)
+                .stock(stock != null ? stock : 0L)
+                .category(category)
                 .build();
-        Product savedProduct = productRepository.save(product);
-        log.info("Product registered successfully with ID: {}", savedProduct.getId());
-        return savedProduct;
+        return productRepository.save(product);
     }
 
     @Override
-    @Transactional(readOnly = true)
-    public Optional<Product> getProduct(Long id) {
+    public Optional<Product> getProductById(Long id) {
         return productRepository.findById(id);
     }
 
     @Override
-    @Transactional
-    public Product updateProduct(Long id, String name, String description, BigDecimal price) {
-        log.info("Updating product with ID: {}", id);
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> new ProductNotFounfException(id));
-        Product updatedProduct = product.updateProduct(name,description,price);
-        Product savedProduct = productRepository.save(updatedProduct);
-
-        log.info("Product updated successfully with ID: {}", savedProduct.getId());
-        return savedProduct;
+    public Page<Product> getAllProducts(Pageable pageable) {
+        return productRepository.findAll(pageable);
     }
 
     @Override
-    @Transactional(readOnly = true)
-    public ProductsPage getAllProducts(int page, int size, String sortBy, String sortDirection) {
-        log.info("Fetching all products - page: {}, size: {}, sort: {} {}", page, size, sortBy, sortDirection);
-        validatePaginationParams(page, size);
-        List<Product> allProducts = productRepository.findAll();
-        List<Product> sortedProducts = sortProducts(allProducts, sortBy, sortDirection);
-        List<Product> pagedProducts = applyPagination(sortedProducts, page, size);
-        int totalElements = pagedProducts.size();
-        int totalPages = (int) Math.ceil((double) totalElements / size);
-        log.info("Retrieved {} products out of {} total", pagedProducts.size(), totalElements);
-        return new ProductsPage(pagedProducts, page, size, totalElements, totalPages);
+    public Product updateProduct(Long id, String name, String description, BigDecimal price, String category) {
+        log.info("Attempting to update product with ID: {}", id);
+        try{
+            Product product = productRepository.findById(id)
+                    .orElseThrow(() -> new ProductNotFounfException(id));
+            Product updatedProduct = product.updateProduct(name, description,price);
+            return productRepository.save(updatedProduct);
+        }
+        catch (ObjectOptimisticLockingFailureException e){
+            log.warn("Concurrency conflict for product ID: {}. Update failed.", id);
+            throw new ConcurrencyException("Product update failed due to a concurrent update. Please retry.");
+        }
     }
 
     @Override
-    @Transactional
     public void deleteProduct(Long id) {
-        log.info("Deleting product with id: {}", id);
+        log.info("Deleting product with ID: {}", id);
+        if (!productRepository.existsById(id)) {
+            throw new ProductNotFounfException(id);
+        }
         productRepository.deleteById(id);
+        log.info("Product deleted successfully with ID: {}", id);
     }
 
     @Override
-    @Transactional
-    public Optional<Product> addStock(Long id, Long quantity) {
-        log.info("Adding stock to product with id: {}", id);
+    public Product updateStock(Long id, Long newStock) {
+        log.info("Attempting to update stock for product ID: {} to {}", id, newStock);
+        try {
+            if (newStock < 0) {
+                throw new IllegalArgumentException("Stock cannot be negative");
+            }
+            Product product = productRepository.findById(id)
+                    .orElseThrow(() -> new ProductNotFounfException(id));
 
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> new ProductNotFounfException(id));
+            Product updatedProduct = product.addStock(newStock);
 
-        Product addedProduct = product.addStock(quantity);
-        Product savedProduct = productRepository.save(addedProduct);
-
-        log.info("Added stock to product with id: {}", id);
-        return Optional.ofNullable(savedProduct);
+            return productRepository.save(updatedProduct);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("Concurrency conflict for product ID: {}. Stock update failed.", id);
+            throw new ConcurrencyException("Stock update failed due to a concurrent update. Please retry.");
+        }
     }
 
     @Override
-    @Transactional
-    public Optional<Product> reduceStock(Long id, Long quantity) {
-        log.info("Reducing stock to product with id: {}", id);
+    public Product reduceStock(Long id, Long quantity) {
+        log.info("Attempting to update stock for product ID: {} to {}", id, quantity);
+        try {
+            if (quantity < 0) {
+                throw new IllegalArgumentException("Stock cannot be negative");
+            }
+            Product product = productRepository.findById(id)
+                    .orElseThrow(() -> new ProductNotFounfException(id));
 
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> new ProductNotFounfException(id));
+            Product updatedProduct = product.reduceStock(quantity);
 
-        Product addedProduct = product.reduceStock(quantity);
-        Product savedProduct = productRepository.save(addedProduct);
-
-        log.info("Reduced stock to product with id: {}", id);
-        return Optional.ofNullable(savedProduct);
+            return productRepository.save(updatedProduct);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("Concurrency conflict for product ID: {}. Stock update failed.", id);
+            throw new ConcurrencyException("Stock update failed due to a concurrent update. Please retry.");
+        }
     }
 
     @Override
-    @Transactional(readOnly = true)
-    public ProductsPage getAvailableProducts(int page, int size, String sortBy, String sortDirection) {
-        log.info("Fetching available products - page: {}, size: {}, sort: {} {}", page, size, sortBy, sortDirection);
-        validatePaginationParams(page, size);
-        List<Product> allProducts = productRepository.findByStockGreaterThan(0L);
-        List<Product> sortedProducts = sortProducts(allProducts, sortBy, sortDirection);
-        List<Product> pagedProducts = applyPagination(sortedProducts, page, size);
-        int totalElements = pagedProducts.size();
-        int totalPages = (int) Math.ceil((double) totalElements / size);
-        log.info("Retrieved {} products out of {} total", pagedProducts.size(), totalElements);
-        return new ProductsPage(pagedProducts, page, size, totalElements, totalPages);
-    }
+    public Product increaseStock(Long id, Long quantity) {
+        log.info("Attempting to update stock for product ID: {} to {}", id, quantity);
+        try {
+            if (quantity < 0) {
+                throw new IllegalArgumentException("Stock cannot be negative");
+            }
+            Product product = productRepository.findById(id)
+                    .orElseThrow(() -> new ProductNotFounfException(id));
 
-    private void validatePaginationParams(int page, int size) {
-        if (page < 0) {
-            throw new IllegalArgumentException("Page must be greater than or equal to 0");
-        }
-        if (size <= 0 || size > 100) {
-            throw new IllegalArgumentException("Size must be between 1 and 100");
+            Product updatedProduct = product.addStock(quantity);
+
+            return productRepository.save(updatedProduct);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("Concurrency conflict for product ID: {}. Stock update failed.", id);
+            throw new ConcurrencyException("Stock update failed due to a concurrent update. Please retry.");
         }
     }
 
-    private List<Product> sortProducts(List<Product> allProducts, String sortBy, String sortDirection) {
-        Comparator<Product> comparator = getComparator(sortBy);
+    @Override
+    public Product reserveStock(Long id, Long quantity) {
+        log.info("Attempting to reserve stock for product ID: {} by {}", id, quantity);
+        try {
+            Product product = productRepository.findById(id)
+            .orElseThrow(() -> new ProductNotFounfException(id));
 
-        if ("desc".equalsIgnoreCase(sortDirection)) {
-            comparator = comparator.reversed();
+            // La lógica de negocio vive en el dominio
+            Product updatedProduct = product.reserveStock(quantity);
+
+            // La capa de repositorio se encarga de la actualización segura
+            return productRepository.save(updatedProduct);
+
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("Concurrency conflict for product ID: {}. Reservation failed.", id);
+            // Lanza una excepción de negocio que puede ser manejada por el orquestador de la saga.
+            throw new ConcurrencyException("Reservation failed due to a concurrent update. Please retry.");
         }
-
-        return allProducts.stream()
-                .sorted(comparator)
-                .collect(Collectors.toList());
     }
 
-    private Comparator<Product> getComparator(String sortBy) {
-        return switch (sortBy.toLowerCase()) {
-            case "name" -> Comparator.comparing(Product::getName);
-            case "price" -> Comparator.comparing(Product::getPrice);
-            case "stock" -> Comparator.comparing(Product::getStock);
-            case "createdat" -> Comparator.comparing(Product::getCreatedAt);
-            case "updatedat" -> Comparator.comparing(Product::getUpdatedAt);
-            default -> Comparator.comparing(Product::getId); // default sort by id
-        };
+    @Override
+    public Product revertStock(Long id, Long quantity) {
+        log.info("Attempting to revert stock for product ID: {} by {}", id, quantity);
+        try {
+            Product product = productRepository.findById(id)
+                    .orElseThrow(() -> new ProductNotFounfException(id));
+
+            // La lógica de negocio vive en el dominio
+            Product updatedProduct = product.revertStock(quantity);
+
+            // La capa de repositorio se encarga de la actualización segura
+            return productRepository.save(updatedProduct);
+
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("Concurrency conflict for product ID: {}. Revert failed.", id);
+            // Lanza una excepción de negocio que puede ser manejada por el orquestador de la saga.
+            throw new ConcurrencyException("Revert failed due to a concurrent update. Please retry.");
+        }
     }
 
-    private List<Product> applyPagination(List<Product> sortedProducts, int page, int size) {
-        int start = page * size;
-        if (start >= sortedProducts.size()) {
-            return List.of();
+    @Override
+    public Product releaseStock(Long id, Long quantity) {
+        log.info("Attempting to release stock for product ID: {} by {}", id, quantity);
+        try {
+            Product product = productRepository.findById(id)
+                    .orElseThrow(() -> new ProductNotFounfException(id));
+
+            // La lógica de negocio vive en el dominio
+            Product updatedProduct = product.releaseStock(quantity);
+
+            // La capa de repositorio se encarga de la actualización segura
+            return productRepository.save(updatedProduct);
+
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("Concurrency conflict for product ID: {}. release failed.", id);
+            // Lanza una excepción de negocio que puede ser manejada por el orquestador de la saga.
+            throw new ConcurrencyException("Reservation failed due to a concurrent update. Please retry.");
         }
-        int end = Math.min(start + size, sortedProducts.size());
-        return sortedProducts.subList(start, end);
+    }
+
+    @Override
+    public Page<Product> getAvailableProducts(Pageable pageable) {
+        return productRepository.findByStockGreaterThan(0L, pageable);
+    }
+
+    @Override
+    public Page<Product> getProductsWithStockGreaterThan(Long minStock, Pageable pageable) {
+        return productRepository.findByStockGreaterThan(minStock, pageable);
+    }
+
+    @Override
+    public Page<Product> getProductsByCategory(String category, Pageable pageable) {
+        return productRepository.findByCategoryAndStatus(category, ProductStatus.ACTIVE, pageable);
+    }
+
+    @Override
+    public Page<Product> searchProducts(String keyword, Pageable pageable) {
+        return productRepository.findByNameContainingOrDescriptionContaining(keyword, pageable);
+    }
+
+    @Override
+    public void deactivateProduct(Long id) {
+        log.info("Attempting to deactivate product with ID: {}", id);
+        try {
+            Product product = productRepository.findById(id)
+                    .orElseThrow(() -> new ProductNotFounfException(id));
+            Product deactivatedProduct = product.deactivate();
+            productRepository.save(deactivatedProduct);
+            log.info("Product deactivated successfully with ID: {}", id);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("Concurrency conflict for product ID: {}. Deactivation failed.", id);
+            throw new ConcurrencyException("Product deactivation failed due to a concurrent update. Please retry.");
+        }
+    }
+
+    @Override
+    public void activateProduct(Long id) {
+        log.info("Attempting to activate product with ID: {}", id);
+        try {
+            Product product = productRepository.findById(id)
+                    .orElseThrow(() -> new ProductNotFounfException(id));
+            Product deactivatedProduct = product.activate();
+            productRepository.save(deactivatedProduct);
+            log.info("Product activated successfully with ID: {}", id);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.warn("Concurrency conflict for product ID: {}. Activation failed.", id);
+            throw new ConcurrencyException("Product activation failed due to a concurrent update. Please retry.");
+        }
     }
 }
